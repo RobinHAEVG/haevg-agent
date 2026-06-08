@@ -1,18 +1,28 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
+
+	"github.com/RobinHAEVG/haevg-agent/agent"
+	"github.com/RobinHAEVG/haevg-agent/configuration"
+	"github.com/RobinHAEVG/haevg-agent/llm"
+	"github.com/RobinHAEVG/haevg-agent/skills"
 
 	"github.com/spf13/cobra"
 )
+
+// Auf Windows ist es %APPDATA%/haevg-agent/
+var configDir = os.Getenv("APPDATA") + "/haevg-agent"
 
 // ---------------------------------------------------------------------------
 // Global flags (persistent across all commands)
 // ---------------------------------------------------------------------------
 
 var (
-	skillPath string // --skill <path-to-skill.md>
+	skillName string // --skill <path-to-skill.md>
 	verbose   bool   // --verbose
 )
 
@@ -22,10 +32,10 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:   "haevg-agent",
-	Short: "HÄVG Agent – flexible Golang CLI für KI-gestützte Aufgaben",
+	Short: "HÄVG Agent - flexible CLI für KI-gestützte Aufgaben",
 	Long: `haevg-agent startet einen KI-Agenten mit einem definierten Skill-Set
 und löst einmalig eine Aufgabe (One-off). Der Agent kann dabei Tools via
-lokalen MCP-Servern nutzen und bei Bedarf Rückfragen stellen.`,
+lokalen MCP-Servern nutzen.`,
 }
 
 // ---------------------------------------------------------------------------
@@ -45,28 +55,48 @@ var runCmd = &cobra.Command{
 Das Ergebnis wird in die angegebene Output-Datei geschrieben.
 
 Beispiel:
-  haevg-agent run --skill skills/impl-planner.md --output result.md "Plane Feature X"`,
+  haevg-agent run --skill impl-planner.md --output result.md "Plane Feature X"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: der Task
 	RunE: func(cmd *cobra.Command, args []string) error {
 		task := args[0]
 
 		if verbose {
-			fmt.Printf("[verbose] Skill:      %s\n", skillPath)
+			fmt.Printf("[verbose] Skill:      %s\n", skillName)
 			fmt.Printf("[verbose] Task:       %s\n", task)
 			fmt.Printf("[verbose] Output:     %s\n", runOutputFile)
 			fmt.Printf("[verbose] Max Steps:  %d\n", runMaxSteps)
 		}
 
-		// TODO: Skill laden
-		// skill, err := skill.Load(skillPath)
+		// Sicherstellen, dass Konfigurationsverzeichnis existiert
+		_ = os.MkdirAll(configDir, 0600)
 
-		// TODO: Agentic Loop starten
-		// result, err := agent.Run(skill, task, runMaxSteps)
+		// Konfiguration laden
+		config, err := configuration.Load(configDir + "/config.yaml")
+		if err != nil {
+			return fmt.Errorf("Konnte Konfiguration nicht laden: %w", err)
+		}
+
+		// Skill laden
+		skill, err := skills.Get(skillName)
+		if err != nil {
+			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
+		}
+		_ = skill
+
+		// Message an LLM senden
+		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
+		agent := &agent.Agent{
+			Config: 	config,
+			LLMClient:   client,
+			LoadedSkill: skill,
+			Task:        task,
+		}
+		// result, err := agent.Run()
 
 		// TODO: Ergebnis schreiben
 		// err = os.WriteFile(runOutputFile, []byte(result), 0644)
 
-		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillPath, task)
+		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, task)
 		fmt.Printf("▶ Ergebnis wird geschrieben nach: %s\n", runOutputFile)
 		return nil
 	},
@@ -78,10 +108,10 @@ Beispiel:
 // ---------------------------------------------------------------------------
 
 var (
-	refineInputFile  string // --input  (bestehende Antwort)
-	refineOutputFile string // --output (Standard: überschreibt input)
-	refineKeepHistory bool  // --keep-history (versioniert speichern)
-	refineMaxSteps   int    // --max-steps
+	refineInputFile   string // --input  (bestehende Antwort)
+	refineOutputFile  string // --output (Standard: überschreibt input)
+	refineKeepHistory bool   // --keep-history (versioniert speichern)
+	refineMaxSteps    int    // --max-steps
 )
 
 var refineCmd = &cobra.Command{
@@ -92,8 +122,8 @@ Standardmäßig wird die Input-Datei überschrieben. Mit --keep-history wird
 eine neue versionierte Datei angelegt (z.B. result.v2.md).
 
 Beispiele:
-  haevg-agent refine --skill skills/impl-planner.md --input result.md "Mache Schritt 3 detaillierter"
-  haevg-agent refine --skill skills/impl-planner.md --input result.md --keep-history "Füge Tests hinzu"`,
+  haevg-agent refine --skill impl-planner.md --input result.md "Mache Schritt 3 detaillierter"
+  haevg-agent refine --skill impl-planner.md --input result.md --keep-history "Füge Tests hinzu"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: die Verfeinerungsanweisung
 	RunE: func(cmd *cobra.Command, args []string) error {
 		instruction := args[0]
@@ -104,7 +134,7 @@ Beispiele:
 		}
 
 		if verbose {
-			fmt.Printf("[verbose] Skill:        %s\n", skillPath)
+			fmt.Printf("[verbose] Skill:        %s\n", skillName)
 			fmt.Printf("[verbose] Instruction:  %s\n", instruction)
 			fmt.Printf("[verbose] Input:        %s\n", refineInputFile)
 			fmt.Printf("[verbose] Output:       %s\n", refineOutputFile)
@@ -124,7 +154,7 @@ Beispiele:
 		// TODO: Ergebnis schreiben (ggf. versioniert)
 		// err = output.Write(refineOutputFile, result, refineKeepHistory)
 
-		fmt.Printf("♻ Refinement gestartet | Skill: %s | Input: %s\n", skillPath, refineInputFile)
+		fmt.Printf("♻ Refinement gestartet | Skill: %s | Input: %s\n", skillName, refineInputFile)
 		fmt.Printf("♻ Anweisung: %s\n", instruction)
 		fmt.Printf("♻ Ergebnis wird geschrieben nach: %s\n", refineOutputFile)
 		return nil
@@ -150,8 +180,8 @@ var skillsListCmd = &cobra.Command{
 		// skills, err := skill.List(configSkillsDir)
 
 		fmt.Println("Verfügbare Skills:")
-		fmt.Println("  skills/impl-planner.md      – Implementationsplaner")
-		fmt.Println("  skills/pipeline-debugger.md – Pipeline Fehlersucher")
+		fmt.Println("  impl-planner.md      - Implementationsplaner")
+		fmt.Println("  pipeline-debugger.md - Pipeline Fehlersucher")
 		// TODO: dynamisch befüllen
 		return nil
 	},
@@ -271,7 +301,7 @@ var configSetCmd = &cobra.Command{
 
 func init() {
 	// --- Persistent Flags (für alle Commands verfügbar) ---
-	rootCmd.PersistentFlags().StringVar(&skillPath, "skill", "", "Pfad zur Skill-Datei (z.B. skills/impl-planner.md)")
+	rootCmd.PersistentFlags().StringVar(&skillName, "skill", "", "Pfad zur Skill-Datei (z.B. skills/impl-planner.md)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Ausführliche Ausgabe aktivieren")
 
 	// --- run Flags ---
