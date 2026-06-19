@@ -32,3 +32,12 @@ func Load(path string) (*AppConfig, error) {
 
 	return &cfg, nil
 }
+
+func ConfigDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(fmt.Sprintf("Konnte Home-Verzeichnis nicht ermitteln: %v", err))
+	}
+
+	return fmt.Sprintf("%s/.haevg-agent", home)
+}

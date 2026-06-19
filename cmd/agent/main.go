@@ -1,12 +1,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
 
-	"github.com/RobinHAEVG/haevg-agent/agent"
+	"github.com/RobinHAEVG/haevg-agent/agents"
 	"github.com/RobinHAEVG/haevg-agent/configuration"
 	"github.com/RobinHAEVG/haevg-agent/llm"
 	"github.com/RobinHAEVG/haevg-agent/skills"
@@ -15,7 +14,7 @@ import (
 )
 
 // Auf Windows ist es %APPDATA%/haevg-agent/
-var configDir = os.Getenv("APPDATA") + "/haevg-agent"
+var configDir = configuration.ConfigDir()
 
 // ---------------------------------------------------------------------------
 // Global flags (persistent across all commands)
@@ -55,7 +54,7 @@ var runCmd = &cobra.Command{
 Das Ergebnis wird in die angegebene Output-Datei geschrieben.
 
 Beispiel:
-  haevg-agent run --skill impl-planner.md --output result.md "Plane Feature X"`,
+  haevg-agent run --skill impl-planner --output result.md "Plane Feature X"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: der Task
 	RunE: func(cmd *cobra.Command, args []string) error {
 		task := args[0]
@@ -81,23 +80,31 @@ Beispiel:
 		if err != nil {
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}
-		_ = skill
+
+		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, task)
+		fmt.Printf("▶ Ergebnis wird geschrieben nach: %s\n", runOutputFile)
 
 		// Message an LLM senden
 		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
-		agent := &agent.Agent{
-			Config: 	config,
+		agent := &agents.Agent{
+			Config:      config,
 			LLMClient:   client,
 			LoadedSkill: skill,
 			Task:        task,
 		}
-		// result, err := agent.Run()
+		result, err := agent.Run()
+		if err != nil {
+			return fmt.Errorf("Konnte Agent nicht ausführen: %w", err)
+		}
 
 		// TODO: Ergebnis schreiben
-		// err = os.WriteFile(runOutputFile, []byte(result), 0644)
+		err = os.WriteFile(runOutputFile, []byte(result), 0644)
+		if err != nil {
+			return fmt.Errorf("Konnte Ergebnis nicht schreiben: %w", err)
+		}
 
-		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, task)
-		fmt.Printf("▶ Ergebnis wird geschrieben nach: %s\n", runOutputFile)
+		fmt.Println("▶ Ausführung abgeschlossen")
+
 		return nil
 	},
 }
@@ -122,8 +129,8 @@ Standardmäßig wird die Input-Datei überschrieben. Mit --keep-history wird
 eine neue versionierte Datei angelegt (z.B. result.v2.md).
 
 Beispiele:
-  haevg-agent refine --skill impl-planner.md --input result.md "Mache Schritt 3 detaillierter"
-  haevg-agent refine --skill impl-planner.md --input result.md --keep-history "Füge Tests hinzu"`,
+  haevg-agent refine --skill impl-planner --input result.md "Mache Schritt 3 detaillierter"
+  haevg-agent refine --skill impl-planner --input result.md --keep-history "Füge Tests hinzu"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: die Verfeinerungsanweisung
 	RunE: func(cmd *cobra.Command, args []string) error {
 		instruction := args[0]
@@ -142,14 +149,36 @@ Beispiele:
 			fmt.Printf("[verbose] Max Steps:    %d\n", refineMaxSteps)
 		}
 
-		// TODO: Skill laden
-		// skill, err := skill.Load(skillPath)
+		// Sicherstellen, dass Konfigurationsverzeichnis existiert
+		_ = os.MkdirAll(configDir, 0600)
 
-		// TODO: Bestehendes Ergebnis laden
-		// priorResult, err := os.ReadFile(refineInputFile)
+		// Konfiguration laden
+		config, err := configuration.Load(configDir + "/config.yaml")
+		if err != nil {
+			return fmt.Errorf("Konnte Konfiguration nicht laden: %w", err)
+		}
 
-		// TODO: Agentic Loop mit Prior Result starten
-		// result, err := agent.Refine(skill, string(priorResult), instruction, refineMaxSteps)
+		// Skill laden
+		skill, err := skills.Get(skillName)
+		if err != nil {
+			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
+		}
+
+		// Bestehendes Ergebnis laden
+		priorResult, err := os.ReadFile(refineInputFile)
+
+		// Agentic Loop mit Prior Result starten
+		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
+		agent := &agents.Agent{
+			Config:      config,
+			LLMClient:   client, // TODO: LLM-Client initialisieren
+			LoadedSkill: skill,
+			Task:        "", // Task könnte optional sein oder aus dem priorResult abgeleitet werden
+		}
+		result, err := agent.Refine(skill, string(priorResult), instruction, refineMaxSteps)
+		if err != nil {
+			return fmt.Errorf("Konnte Agent nicht ausführen: %w", err)
+		}
 
 		// TODO: Ergebnis schreiben (ggf. versioniert)
 		// err = output.Write(refineOutputFile, result, refineKeepHistory)

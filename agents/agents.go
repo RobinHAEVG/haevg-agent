@@ -1,12 +1,14 @@
-package agent
+package agents
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/RobinHAEVG/haevg-agent/configuration"
 	"github.com/RobinHAEVG/haevg-agent/llm"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/RobinHAEVG/haevg-agent/mcp"
 )
 
 type Agent struct {
@@ -14,14 +16,14 @@ type Agent struct {
 	LLMClient   *llm.Client
 	LoadedSkill string
 	Task        string
-	MCPClient   *mcp.Client // add mcp client for azure devops tools
+	MCPClient   *mcp.Client
 }
 
 func (a *Agent) Run() (string, error) {
 	// -----------------------------------------------------------------------
 	// 1. Fetch tools from the MCP server and convert to OpenAI format.
 	// -----------------------------------------------------------------------
-	mcpTools, err := a.mcpClient.ListTools()
+	mcpTools, err := a.MCPClient.ListTools()
 	if err != nil {
 		return "", fmt.Errorf("agent: list tools: %w", err)
 	}
@@ -34,10 +36,10 @@ func (a *Agent) Run() (string, error) {
 	// -----------------------------------------------------------------------
 	messages := []llm.Message{}
 
-	if a.cfg.SystemPrompt != "" {
+	if a.Config.SystemPrompt != "" {
 		messages = append(messages, llm.Message{
 			Role:    "system",
-			Content: a.cfg.SystemPrompt,
+			Content: a.Config.SystemPrompt,
 		})
 	}
 
@@ -133,4 +135,76 @@ func (a *Agent) Run() (string, error) {
 			return assistantMsg.Content, nil
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------
+// executeTool
+// ---------------------------------------------------------------------------
+
+func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (string, error) {
+	name := tc.Function.Name
+	rawArgs := tc.Function.Arguments
+
+	// Parse the arguments so we can pretty-print them.
+	var argsMap map[string]interface{}
+	_ = json.Unmarshal([]byte(rawArgs), &argsMap)
+
+	if a.cfg.Verbose {
+		pretty, _ := json.MarshalIndent(argsMap, "  ", "  ")
+		a.logf("[TOOL CALL] %s\n  args: %s\n", name, pretty)
+	}
+
+	// Delegate to the MCP client which forwards to the MCP server.
+	result, err := a.mcpClient.CallTool(name, json.RawMessage(rawArgs))
+	if err != nil {
+		if a.cfg.Verbose {
+			a.logf("[TOOL RESULT] %s → ERROR: %s\n", name, err)
+		}
+		return "", err
+	}
+
+	if a.cfg.Verbose {
+		a.logf("[TOOL RESULT] %s → %s\n", name, result)
+	}
+
+	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// convertTools — MCP → OpenAI format
+// ---------------------------------------------------------------------------
+
+// convertTools converts a slice of MCP tool definitions to the OpenAI Tool
+// format expected by the chat-completions API.
+func convertTools(mcpTools []mcp.Tool) []llm.Tool {
+	out := make([]llm.Tool, 0, len(mcpTools))
+	for _, t := range mcpTools {
+		out = append(out, llm.Tool{
+			Type: "function",
+			Function: llm.Function{
+				Name:        t.Name,
+				Description: t.Description,
+				Parameters:  t.InputSchema,
+			},
+		})
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func (a *Agent) logf(format string, args ...interface{}) {
+	if a.cfg.Out != nil {
+		fmt.Fprintf(a.cfg.Out, format, args...)
+	}
+}
+
+func toolNames(tools []llm.Tool) string {
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Function.Name
+	}
+	return strings.Join(names, ", ")
 }
