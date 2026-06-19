@@ -20,8 +20,8 @@ type Skill struct {
 
 const delim = "---"
 
-// ParseSkill parses the content of a skill file and returns the markdown content and the extracted metadata.
-func ParseSkill(name string) (*Skill, error) {
+// Parse parses the content of a skill file and returns the markdown content and the extracted metadata.
+func Parse(name string) (*Skill, error) {
 	rawContent, err := skillFiles.ReadFile("skillfiles/" + name + ".md")
 	if err != nil {
 		return nil, fmt.Errorf("skills: read skill file '%s': %w", name, err)

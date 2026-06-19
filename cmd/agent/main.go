@@ -2,13 +2,16 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
 	"github.com/RobinHAEVG/haevg-agent/agents"
 	"github.com/RobinHAEVG/haevg-agent/configuration"
 	"github.com/RobinHAEVG/haevg-agent/llm"
+	"github.com/RobinHAEVG/haevg-agent/mcp"
 	"github.com/RobinHAEVG/haevg-agent/skills"
+	"github.com/RobinHAEVG/haevg-agent/tools"
 
 	"github.com/spf13/cobra"
 )
@@ -76,7 +79,7 @@ Beispiel:
 		}
 
 		// Skill laden
-		skill, err := skills.Load(skillName)
+		skill, err := skills.Parse(skillName)
 		if err != nil {
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}
@@ -84,13 +87,39 @@ Beispiel:
 		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, task)
 		fmt.Printf("▶ Ergebnis wird geschrieben nach: %s\n", runOutputFile)
 
-		// Message an LLM senden
 		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
+
+		serverR, clientW := io.Pipe()
+		clientR, serverW := io.Pipe()
+
+		store := tools.NewStore(config, WORKDIR, logger, true)
+		srv := mcp.NewServer()
+		tools.RegisterAll(srv, store)
+
+		go func() {
+			if err := srv.Serve(serverR, serverW); err != nil && err != io.ErrClosedPipe {
+				fmt.Printf("MCP server gestoppt: %v", err)
+			}
+			serverW.Close() //nolint:errcheck
+		}()
+
+		fmt.Println("MCP server gestartet (in-process).")
+
+		mcpClient := mcp.NewClient(clientR, clientW)
+		if err := mcpClient.Initialize(); err != nil {
+			return fmt.Errorf("MCP handshake fehlgeschlagen: %w", err)
+		}
+
+		fmt.Println("MCP handshake abgeschlossen.")
+
+		// Agent aufsetzen und ausführen
 		agent := &agents.Agent{
 			Config:      config,
 			LLMClient:   client,
 			LoadedSkill: skill,
-			Task:        task,
+			MCPClient:   mcpClient,
+			Verbose:     true,
+			Out:         os.Stderr, // Log-Ausgabe auf stderr
 		}
 		result, err := agent.Run()
 		if err != nil {
