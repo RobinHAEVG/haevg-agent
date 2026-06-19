@@ -2,15 +2,11 @@ package skills
 
 import (
 	"embed"
+	"strings"
 )
 
 //go:embed skillfiles/*
 var skillFiles embed.FS
-
-func Get(name string) (string, error) {
-	content, err := skillFiles.ReadFile("skillfiles/" + name)
-	return string(content), err
-}
 
 func List() ([]string, error) {
 	entries, err := skillFiles.ReadDir("skillfiles")
@@ -21,7 +17,7 @@ func List() ([]string, error) {
 	var names []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			names = append(names, entry.Name())
+			names = append(names, strings.TrimSuffix(entry.Name(), ".md"))
 		}
 	}
 

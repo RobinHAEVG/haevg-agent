@@ -76,7 +76,7 @@ Beispiel:
 		}
 
 		// Skill laden
-		skill, err := skills.Get(skillName)
+		skill, err := skills.Load(skillName)
 		if err != nil {
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}
@@ -159,7 +159,7 @@ Beispiele:
 		}
 
 		// Skill laden
-		skill, err := skills.Get(skillName)
+		skill, err := skills.Load(skillName)
 		if err != nil {
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}

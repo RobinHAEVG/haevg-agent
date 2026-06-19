@@ -4,22 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/RobinHAEVG/haevg-agent/configuration"
 	"github.com/RobinHAEVG/haevg-agent/llm"
 	"github.com/RobinHAEVG/haevg-agent/mcp"
+	"github.com/RobinHAEVG/haevg-agent/skills"
+)
+
+const (
+	maxIterations            = 10
+	maxConsecutiveToolErrors = 2
+	maxTotalToolErrors       = 5
 )
 
 type Agent struct {
 	Config      *configuration.AppConfig
 	LLMClient   *llm.Client
-	LoadedSkill string
-	Task        string
+	LoadedSkill *skills.Skill
 	MCPClient   *mcp.Client
+	Verbose     bool
+	Out         io.Writer
 }
 
-func (a *Agent) Run() (string, error) {
+func (a *Agent) Run(ctx context.Context, userPrompt string) (string, error) {
 	// -----------------------------------------------------------------------
 	// 1. Fetch tools from the MCP server and convert to OpenAI format.
 	// -----------------------------------------------------------------------
@@ -36,10 +45,10 @@ func (a *Agent) Run() (string, error) {
 	// -----------------------------------------------------------------------
 	messages := []llm.Message{}
 
-	if a.Config.SystemPrompt != "" {
+	if a.LoadedSkill.Content != "" {
 		messages = append(messages, llm.Message{
 			Role:    "system",
-			Content: a.Config.SystemPrompt,
+			Content: a.LoadedSkill.Content,
 		})
 	}
 
@@ -56,9 +65,13 @@ func (a *Agent) Run() (string, error) {
 	consecutiveToolErrors := 0
 
 	for {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("agent: context error: %w", ctx.Err())
+		}
+
 		iterations++
-		if iterations > a.cfg.MaxIterations {
-			return "", fmt.Errorf("agent: max iterations exceeded (%d)", a.cfg.MaxIterations)
+		if iterations > maxIterations {
+			return "", fmt.Errorf("agent: max iterations exceeded (%d)", maxIterations)
 		}
 
 		req := llm.ChatRequest{
@@ -68,7 +81,7 @@ func (a *Agent) Run() (string, error) {
 
 		a.logf("[LLM] Sending request with %d message(s)...\n", len(messages))
 
-		resp, err := a.llmClient.Chat(ctx, req)
+		resp, err := a.LLMClient.Chat(ctx, req)
 		if err != nil {
 			return "", fmt.Errorf("agent: LLM call: %w", err)
 		}
@@ -98,12 +111,12 @@ func (a *Agent) Run() (string, error) {
 					// Propagate the error as a tool result so the LLM can react.
 					result = fmt.Sprintf("Error: %s", err.Error())
 
-					if consecutiveToolErrors > a.cfg.MaxConsecutiveToolErrors {
-						return "", fmt.Errorf("agent: consecutive tool error budget exceeded (%d)", a.cfg.MaxConsecutiveToolErrors)
+					if consecutiveToolErrors > maxConsecutiveToolErrors {
+						return "", fmt.Errorf("agent: consecutive tool error budget exceeded (%d)", maxConsecutiveToolErrors)
 					}
 
-					if totalToolErrors > a.cfg.MaxTotalToolErrors {
-						return "", fmt.Errorf("agent: total tool error budget exceeded (%d)", a.cfg.MaxTotalToolErrors)
+					if totalToolErrors > maxTotalToolErrors {
+						return "", fmt.Errorf("agent: total tool error budget exceeded (%d)", maxTotalToolErrors)
 					}
 				} else {
 					consecutiveToolErrors = 0
@@ -149,21 +162,21 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (string, error
 	var argsMap map[string]interface{}
 	_ = json.Unmarshal([]byte(rawArgs), &argsMap)
 
-	if a.cfg.Verbose {
+	if a.Verbose {
 		pretty, _ := json.MarshalIndent(argsMap, "  ", "  ")
 		a.logf("[TOOL CALL] %s\n  args: %s\n", name, pretty)
 	}
 
 	// Delegate to the MCP client which forwards to the MCP server.
-	result, err := a.mcpClient.CallTool(name, json.RawMessage(rawArgs))
+	result, err := a.MCPClient.CallTool(name, json.RawMessage(rawArgs))
 	if err != nil {
-		if a.cfg.Verbose {
+		if a.Verbose {
 			a.logf("[TOOL RESULT] %s → ERROR: %s\n", name, err)
 		}
 		return "", err
 	}
 
-	if a.cfg.Verbose {
+	if a.Verbose {
 		a.logf("[TOOL RESULT] %s → %s\n", name, result)
 	}
 
@@ -196,8 +209,8 @@ func convertTools(mcpTools []mcp.Tool) []llm.Tool {
 // ---------------------------------------------------------------------------
 
 func (a *Agent) logf(format string, args ...interface{}) {
-	if a.cfg.Out != nil {
-		fmt.Fprintf(a.cfg.Out, format, args...)
+	if a.Out != nil {
+		fmt.Fprintf(a.Out, format, args...)
 	}
 }
 
