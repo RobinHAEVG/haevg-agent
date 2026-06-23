@@ -10,16 +10,20 @@ import (
 
 type (
 	AppConfig struct {
-		LLM struct {
-			BaseURL string        `yaml:"base_url"`
-			Model   string        `yaml:"model"`
-			APIKey  string        `yaml:"api_key"`
-			Timeout time.Duration `yaml:"timeout"`
-		} `yaml:"llm"`
-		AzureDevops struct {
-			Organization string `yaml:"organization"`
-			Project      string `yaml:"project"`
-		} `yaml:"azure_devops"`
+		LLM         LLM         `yaml:"llm"`
+		AzureDevops AzureDevops `yaml:"azure_devops"`
+	}
+
+	LLM struct {
+		BaseURL string        `yaml:"base_url"`
+		Model   string        `yaml:"model"`
+		APIKey  string        `yaml:"api_key"`
+		Timeout time.Duration `yaml:"timeout"`
+	}
+	AzureDevops struct {
+		Organization string `yaml:"organization"`
+		Project      string `yaml:"project"`
+		APIKey       string `yaml:"api_key"`
 	}
 )
 

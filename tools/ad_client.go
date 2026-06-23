@@ -14,13 +14,15 @@ type ADClient struct {
 	httpClient   *http.Client
 	organization string
 	project      string
+	apiKey       string
 }
 
-func NewADClient(httpClient *http.Client, organization, project string) *ADClient {
+func NewADClient(httpClient *http.Client, organization, project, apiKey string) *ADClient {
 	return &ADClient{
 		httpClient:   httpClient,
 		organization: organization,
 		project:      project,
+		apiKey:       apiKey,
 	}
 }
 
@@ -56,10 +58,7 @@ func (c *ADClient) GetLatestPipelineLogs(pipelineId, runId string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("build logs index request: %w", err)
 	}
-
-	if pat := readAzureDevOpsPAT(); pat != "" {
-		req.SetBasicAuth("", pat)
-	}
+	req.SetBasicAuth("", c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

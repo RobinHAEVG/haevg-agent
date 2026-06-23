@@ -28,7 +28,7 @@ func NewStore(appConfig *configuration.AppConfig, workDir string, logger *slog.L
 		workDir:    workDir,
 		logger:     logger,
 		httpClient: httpClient,
-		adClient:   NewADClient(httpClient, appConfig.AzureDevops.Organization, appConfig.AzureDevops.Project),
+		adClient:   NewADClient(httpClient, appConfig.AzureDevops.Organization, appConfig.AzureDevops.Project, appConfig.AzureDevops.APIKey),
 		mut:        &sync.Mutex{},
 	}
 
