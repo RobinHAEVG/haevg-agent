@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/RobinHAEVG/haevg-agent/configuration"
 	"github.com/RobinHAEVG/haevg-agent/mcp"
@@ -17,26 +16,20 @@ type Store struct {
 	appConfig  *configuration.AppConfig
 	workDir    string
 	httpClient *http.Client
-	adClient   *adClient // azure devops client
+	adClient   *ADClient // azure devops client
 	mut        *sync.Mutex
 }
 
 // NewStore creates a Store pre-seeded with some sample wiki content.
 func NewStore(appConfig *configuration.AppConfig, workDir string, logger *slog.Logger, verbose bool, httpClient *http.Client) *Store {
 	s := &Store{
-		verbose:   verbose,
-		appConfig: appConfig,
-		workDir:   workDir,
-		logger:    logger,
-		mut:       &sync.Mutex{},
-	}
-
-	if httpClient != nil {
-		s.httpClient = httpClient
-	} else {
-		s.httpClient = &http.Client{
-			Timeout: 30 * time.Second,
-		}
+		verbose:    verbose,
+		appConfig:  appConfig,
+		workDir:    workDir,
+		logger:     logger,
+		httpClient: httpClient,
+		adClient:   NewADClient(httpClient, appConfig.AzureDevops.Organization, appConfig.AzureDevops.Project),
+		mut:        &sync.Mutex{},
 	}
 
 	return s

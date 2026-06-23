@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/RobinHAEVG/haevg-agent/mcp"
 )
@@ -43,8 +44,16 @@ func (s *Store) getLatestPipelineLogs(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return "", err
 	}
-	
-	
 
-	return result, err
+	if strings.TrimSpace(args.PipelineId) == "" {
+		return "", fmt.Errorf("pipelineId is required")
+	}
+	if strings.TrimSpace(args.RunId) == "" {
+		return "", fmt.Errorf("runId is required")
+	}
+	if s.adClient == nil {
+		return "", fmt.Errorf("azure devops client not configured; set AZURE_DEVOPS_ORGANIZATION and AZURE_DEVOPS_PROJECT environment variables")
+	}
+
+	return s.adClient.GetLatestPipelineLogs(args.PipelineId, args.RunId)
 }

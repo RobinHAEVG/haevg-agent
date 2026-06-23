@@ -16,6 +16,10 @@ type (
 			APIKey  string        `yaml:"api_key"`
 			Timeout time.Duration `yaml:"timeout"`
 		} `yaml:"llm"`
+		AzureDevops struct {
+			Organization string `yaml:"organization"`
+			Project      string `yaml:"project"`
+		} `yaml:"azure_devops"`
 	}
 )
 

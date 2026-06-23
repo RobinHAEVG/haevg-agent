@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/RobinHAEVG/haevg-agent/agents"
 	"github.com/RobinHAEVG/haevg-agent/configuration"
@@ -105,7 +106,9 @@ Beispiel:
 		serverR, clientW := io.Pipe()
 		clientR, serverW := io.Pipe()
 
-		store := tools.NewStore(config, workdir, logger, verbose)
+		httpClient := &http.Client{Timeout: 1 * time.Minute}
+
+		store := tools.NewStore(config, workdir, logger, verbose, httpClient)
 		srv := mcp.NewServer()
 		tools.RegisterAll(srv, store)
 
