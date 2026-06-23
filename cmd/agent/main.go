@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 
@@ -60,17 +62,28 @@ Beispiel:
   haevg-agent run --skill impl-planner --output result.md "Plane Feature X"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: der Task
 	RunE: func(cmd *cobra.Command, args []string) error {
-		task := args[0]
+		instructions := args[0]
 
 		if verbose {
 			fmt.Printf("[verbose] Skill:      %s\n", skillName)
-			fmt.Printf("[verbose] Task:       %s\n", task)
 			fmt.Printf("[verbose] Output:     %s\n", runOutputFile)
 			fmt.Printf("[verbose] Max Steps:  %d\n", runMaxSteps)
 		}
 
+		logLevel := slog.LevelInfo
+		if verbose {
+			logLevel = slog.LevelDebug
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+
 		// Sicherstellen, dass Konfigurationsverzeichnis existiert
 		_ = os.MkdirAll(configDir, 0600)
+
+		// Arbeitsverzeichnis ermitteln
+		workdir, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("Konnte Arbeitsverzeichnis nicht ermitteln: %w", err)
+		}
 
 		// Konfiguration laden
 		config, err := configuration.Load(configDir + "/config.yaml")
@@ -84,7 +97,7 @@ Beispiel:
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}
 
-		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, task)
+		fmt.Printf("▶ Agent gestartet | Skill: %s | Task: %s\n", skillName, instructions)
 		fmt.Printf("▶ Ergebnis wird geschrieben nach: %s\n", runOutputFile)
 
 		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
@@ -92,7 +105,7 @@ Beispiel:
 		serverR, clientW := io.Pipe()
 		clientR, serverW := io.Pipe()
 
-		store := tools.NewStore(config, WORKDIR, logger, true)
+		store := tools.NewStore(config, workdir, logger, verbose)
 		srv := mcp.NewServer()
 		tools.RegisterAll(srv, store)
 
@@ -118,10 +131,10 @@ Beispiel:
 			LLMClient:   client,
 			LoadedSkill: skill,
 			MCPClient:   mcpClient,
-			Verbose:     true,
-			Out:         os.Stderr, // Log-Ausgabe auf stderr
+			Verbose:     verbose,
+			Logger:      logger,
 		}
-		result, err := agent.Run()
+		result, err := agent.Run(context.TODO(), "TODO")
 		if err != nil {
 			return fmt.Errorf("Konnte Agent nicht ausführen: %w", err)
 		}
@@ -162,7 +175,7 @@ Beispiele:
   haevg-agent refine --skill impl-planner --input result.md --keep-history "Füge Tests hinzu"`,
 	Args: cobra.ExactArgs(1), // genau 1 positionaler Arg: die Verfeinerungsanweisung
 	RunE: func(cmd *cobra.Command, args []string) error {
-		instruction := args[0]
+		instructions := args[0]
 
 		// Output-Datei: Standard = Input-Datei überschreiben
 		if refineOutputFile == "" {
@@ -171,7 +184,6 @@ Beispiele:
 
 		if verbose {
 			fmt.Printf("[verbose] Skill:        %s\n", skillName)
-			fmt.Printf("[verbose] Instruction:  %s\n", instruction)
 			fmt.Printf("[verbose] Input:        %s\n", refineInputFile)
 			fmt.Printf("[verbose] Output:       %s\n", refineOutputFile)
 			fmt.Printf("[verbose] Keep History: %v\n", refineKeepHistory)
@@ -188,13 +200,16 @@ Beispiele:
 		}
 
 		// Skill laden
-		skill, err := skills.Load(skillName)
+		skill, err := skills.Parse(skillName)
 		if err != nil {
 			return fmt.Errorf("Konnte Skill nicht laden: %w", err)
 		}
 
 		// Bestehendes Ergebnis laden
 		priorResult, err := os.ReadFile(refineInputFile)
+		if err != nil {
+			return fmt.Errorf("Konnte bestehendes Ergebnis nicht laden: %w", err)
+		}
 
 		// Agentic Loop mit Prior Result starten
 		client := llm.NewClient(config, &http.Client{Timeout: config.LLM.Timeout})
@@ -202,18 +217,20 @@ Beispiele:
 			Config:      config,
 			LLMClient:   client, // TODO: LLM-Client initialisieren
 			LoadedSkill: skill,
-			Task:        "", // Task könnte optional sein oder aus dem priorResult abgeleitet werden
 		}
-		result, err := agent.Refine(skill, string(priorResult), instruction, refineMaxSteps)
+
+		userPrompt := fmt.Sprintf("Verfeinere bestehendes Ergebnis:\n%s\nAnweisung: %s", string(priorResult), instructions)
+		result, err := agent.Run(context.TODO(), userPrompt)
 		if err != nil {
 			return fmt.Errorf("Konnte Agent nicht ausführen: %w", err)
 		}
+		_ = result // TODO: Ergebnis weiterverarbeiten
 
 		// TODO: Ergebnis schreiben (ggf. versioniert)
 		// err = output.Write(refineOutputFile, result, refineKeepHistory)
 
 		fmt.Printf("♻ Refinement gestartet | Skill: %s | Input: %s\n", skillName, refineInputFile)
-		fmt.Printf("♻ Anweisung: %s\n", instruction)
+		fmt.Printf("♻ Anweisung: %s\n", instructions)
 		fmt.Printf("♻ Ergebnis wird geschrieben nach: %s\n", refineOutputFile)
 		return nil
 	},
